@@ -20,7 +20,14 @@ from aiogram.types import (
     CallbackQuery,
 )
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+# =========================================================
+# CONFIG
+# =========================================================
 
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@your_channel")
@@ -28,9 +35,12 @@ REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@your_channel")
 if not TG_BOT_TOKEN:
     raise RuntimeError("TG_BOT_TOKEN is not set")
 
+if not REQUIRED_CHANNEL:
+    raise RuntimeError("REQUIRED_CHANNEL is not set")
+
 
 # =========================================================
-# СОСТОЯНИЯ
+# STATES
 # =========================================================
 
 class SearchState(StatesGroup):
@@ -38,7 +48,7 @@ class SearchState(StatesGroup):
 
 
 # =========================================================
-# ГОРОД
+# PLACE
 # =========================================================
 
 @dataclass
@@ -51,11 +61,11 @@ class Place:
 
 
 # =========================================================
-# КЛАВИАТУРЫ
+# KEYBOARDS
 # =========================================================
 
-def subscription_keyboard():
-    channel_username = REQUIRED_CHANNEL.replace("@", "")
+def subscription_keyboard() -> InlineKeyboardMarkup:
+    channel_username = REQUIRED_CHANNEL.lstrip("@")
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -75,7 +85,7 @@ def subscription_keyboard():
     )
 
 
-def main_keyboard():
+def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -95,10 +105,14 @@ def main_keyboard():
 
 
 # =========================================================
-# ПРОВЕРКА ПОДПИСКИ
+# SUBSCRIPTION
 # =========================================================
 
-async def is_subscribed(bot: Bot, user_id: int) -> bool:
+async def is_subscribed(
+    bot: Bot,
+    user_id: int,
+) -> bool:
+
     try:
         member = await bot.get_chat_member(
             chat_id=REQUIRED_CHANNEL,
@@ -111,8 +125,11 @@ async def is_subscribed(bot: Bot, user_id: int) -> bool:
             "member",
         }
 
-    except Exception as e:
-        logging.error(f"Subscription check error: {e}")
+    except Exception as error:
+        logging.error(
+            "Subscription check error: %s",
+            error,
+        )
         return False
 
 
@@ -121,14 +138,21 @@ async def subscription_required(
     bot: Bot,
 ) -> bool:
 
-    if await is_subscribed(bot, message.from_user.id):
+    if not message.from_user:
+        return False
+
+    if await is_subscribed(
+        bot,
+        message.from_user.id,
+    ):
         return True
 
     await message.answer(
         "🔒 <b>Доступ закрыт</b>\n\n"
-        "Чтобы пользоваться ботом, сначала подпишись "
-        "на наш Telegram-канал.\n\n"
-        "После подписки нажми «Проверить подписку».",
+        "Чтобы пользоваться ботом, сначала "
+        "подпишись на наш Telegram-канал.\n\n"
+        "После подписки нажми "
+        "«✅ Проверить подписку».",
         reply_markup=subscription_keyboard(),
     )
 
@@ -148,7 +172,9 @@ FORECAST_URL = (
 )
 
 
-async def geocode(city: str) -> Optional[Place]:
+async def geocode(
+    city: str,
+) -> Optional[Place]:
 
     params = {
         "name": city,
@@ -180,8 +206,8 @@ async def geocode(city: str) -> Optional[Place]:
         name=result.get("name", city),
         admin1=result.get("admin1", ""),
         country=result.get("country", ""),
-        latitude=result["latitude"],
-        longitude=result["longitude"],
+        latitude=float(result["latitude"]),
+        longitude=float(result["longitude"]),
     )
 
 
@@ -189,14 +215,12 @@ async def get_weather(
     latitude: float,
     longitude: float,
     days: int = 7,
-):
+) -> dict:
 
     params = {
         "latitude": latitude,
         "longitude": longitude,
-
         "timezone": "auto",
-
         "forecast_days": days,
 
         "current": ",".join(
@@ -240,7 +264,7 @@ async def get_weather(
 
 
 # =========================================================
-# ОПИСАНИЕ ПОГОДЫ
+# WEATHER DESCRIPTION
 # =========================================================
 
 def weather_text(code: int) -> str:
@@ -293,7 +317,7 @@ def weather_text(code: int) -> str:
 
 
 # =========================================================
-# СОВЕТ ПО ОДЕЖДЕ
+# CLOTHING
 # =========================================================
 
 def clothing(
@@ -304,87 +328,91 @@ def clothing(
     weather_code: int,
 ) -> str:
 
+    # Для одежды ориентируемся прежде всего
+    # на ощущаемую температуру.
     t = apparent
 
-    if t < -15:
-
+    if t < -20:
         outfit = (
-            "термобельё + тёплый свитер/флис + "
-            "очень тёплая зимняя куртка"
+            "очень тёплое термобельё, "
+            "флис/свитер, зимняя куртка, "
+            "тёплые штаны, шапка и перчатки"
         )
 
-    elif t < -5:
-
+    elif t < -10:
         outfit = (
-            "термобельё + свитер/худи + "
-            "зимняя куртка"
+            "термобельё, тёплый свитер "
+            "и зимняя куртка; шапка и перчатки"
         )
 
-    elif t < 5:
-
+    elif t < 0:
         outfit = (
-            "лонгслив/свитер + "
+            "тёплый свитер или худи + "
+            "зимняя/утеплённая куртка"
+        )
+
+    elif t < 7:
+        outfit = (
+            "лонгслив или свитер + "
             "тёплая куртка"
         )
 
     elif t < 12:
-
         outfit = (
-            "лонгслив или худи + "
+            "лонгслив/худи + "
             "лёгкая куртка"
         )
 
-    elif t < 18:
-
+    elif t < 17:
         outfit = (
-            "лонгслив/тонкий свитер + "
-            "лёгкая верхняя одежда"
+            "лонгслив или тонкий свитер + "
+            "лёгкая куртка"
         )
 
-    elif t < 23:
-
+    elif t < 22:
         outfit = (
-            "футболка; на вечер лучше "
-            "взять лёгкий лонгслив"
+            "футболка или лонгслив; "
+            "на вечер лучше взять лёгкую куртку"
         )
 
-    elif t < 28:
-
+    elif t < 27:
         outfit = (
-            "футболка и лёгкие брюки/шорты"
+            "футболка + лёгкие брюки "
+            "или шорты"
         )
 
     else:
-
         outfit = (
-            "лёгкая футболка и шорты"
+            "лёгкая футболка + шорты; "
+            "избегай лишних слоёв"
         )
 
     extras = []
 
+    rain_codes = {
+        51, 53, 55,
+        56, 57,
+        61, 63, 65,
+        66, 67,
+        80, 81, 82,
+        95, 96, 99,
+    }
+
     if (
         rain_probability >= 40
-        or weather_code in {
-            51, 53, 55,
-            61, 63, 65,
-            66, 67,
-            80, 81, 82,
-            95, 96, 99,
-        }
+        or weather_code in rain_codes
     ):
-
         extras.append(
             "возьми зонт или дождевик"
         )
 
     if wind >= 30:
-
         extras.append(
-            "из-за ветра лучше добавить ветровку"
+            "из-за сильного ветра лучше "
+            "добавить ветровку"
         )
 
     if t >= 25:
-
         extras.append(
             "не забудь воду"
         )
@@ -392,14 +420,13 @@ def clothing(
     result = outfit
 
     if extras:
-
         result += "; " + "; ".join(extras)
 
     return result + "."
 
 
 # =========================================================
-# НАЗВАНИЕ ГОРОДА
+# PLACE TITLE
 # =========================================================
 
 def place_title(place: Place) -> str:
@@ -419,7 +446,7 @@ def place_title(place: Place) -> str:
 
 
 # =========================================================
-# ТЕКУЩАЯ ПОГОДА
+# CURRENT WEATHER MESSAGE
 # =========================================================
 
 def current_message(
@@ -429,41 +456,37 @@ def current_message(
 
     current = data["current"]
 
+    # Сначала вычисляем совет отдельно.
+    # Это предотвращает ошибки f-string.
+    outfit = clothing(
+        temperature=current["temperature_2m"],
+        apparent=current["apparent_temperature"],
+        rain_probability=0,
+        wind=current["wind_speed_10m"],
+        weather_code=current["weather_code"],
+    )
+
     return (
         f"🌤 <b>{place_title(place)}</b>\n\n"
-
         f"{weather_text(current['weather_code'])}\n"
-
         f"🌡 Температура: "
         f"<b>{current['temperature_2m']:.0f}°C</b>\n"
-
         f"🤔 Ощущается: "
         f"<b>{current['apparent_temperature']:.0f}°C</b>\n"
-
         f"💧 Влажность: "
         f"{current['relative_humidity_2m']}%\n"
-
         f"🌧 Осадки сейчас: "
         f"{current['precipitation']} мм\n"
-
         f"💨 Ветер: "
         f"{current['wind_speed_10m']:.0f} км/ч\n\n"
-
         f"👕 <b>Что надеть:</b>\n"
-        f"{clothing("
-        f"current['temperature_2m'], "
-        f"current['apparent_temperature'], "
-        f"0, "
-        f"current['wind_speed_10m'], "
-        f"current['weather_code']"
-        f")}\n\n"
-
+        f"{outfit}\n\n"
         f"📡 Источник: Open-Meteo"
     )
 
 
 # =========================================================
-# 7 ДНЕЙ
+# 7-DAY MESSAGE
 # =========================================================
 
 def week_message(
@@ -474,12 +497,14 @@ def week_message(
     daily = data["daily"]
 
     result = [
-        f"📅 <b>Прогноз на 7 дней</b>",
-        f"🏙 {place_title(place)}",
+        "📅 <b>Прогноз на 7 дней</b>",
+        f"🏙 <b>{place_title(place)}</b>",
         "",
     ]
 
-    for i, date in enumerate(daily["time"]):
+    for i, date in enumerate(
+        daily["time"]
+    ):
 
         rain = daily[
             "precipitation_probability_max"
@@ -501,6 +526,10 @@ def week_message(
             "temperature_2m_max"
         ][i]
 
+        apparent_min = daily[
+            "apparent_temperature_min"
+        ][i]
+
         apparent_max = daily[
             "apparent_temperature_max"
         ][i]
@@ -510,22 +539,28 @@ def week_message(
         ][i]
 
         outfit = clothing(
-            temp_max,
-            apparent_max,
-            rain,
-            wind,
-            code,
+            temperature=temp_max,
+            apparent=apparent_max,
+            rain_probability=rain,
+            wind=wind,
+            weather_code=code,
         )
 
         result.append(
             f"<b>{date}</b>\n"
             f"{weather_text(code)}\n"
-            f"🌡 {temp_min:.0f}…{temp_max:.0f}°C\n"
-            f"🤔 Ощущается до {apparent_max:.0f}°C\n"
-            f"🌧 Дождь: {rain}%\n"
-            f"💧 Осадки: {precipitation:.1f} мм\n"
-            f"💨 Ветер: {wind:.0f} км/ч\n"
-            f"👕 {outfit}\n"
+            f"🌡 Температура: "
+            f"{temp_min:.0f}…{temp_max:.0f}°C\n"
+            f"🤔 Ощущается: "
+            f"{apparent_min:.0f}…{apparent_max:.0f}°C\n"
+            f"🌧 Вероятность осадков: "
+            f"{rain}%\n"
+            f"💧 Осадки: "
+            f"{precipitation:.1f} мм\n"
+            f"💨 Максимальный ветер: "
+            f"{wind:.0f} км/ч\n"
+            f"👕 <b>Что надеть:</b> "
+            f"{outfit}\n"
         )
 
     result.append(
@@ -536,39 +571,41 @@ def week_message(
 
 
 # =========================================================
-# СОХРАНЁННЫЙ ГОРОД
+# SAVED PLACE
 # =========================================================
 
 async def get_saved_place(
     state: FSMContext,
-):
+) -> Optional[Place]:
 
     data = await state.get_data()
 
-    if "place" not in data:
+    place_data = data.get("place")
+
+    if not place_data:
         return None
 
     return Place(
-        **data["place"]
+        **place_data
     )
 
 
 # =========================================================
-# ОТПРАВКА ПОГОДЫ
+# SEND WEATHER
 # =========================================================
 
 async def send_weather(
     message: Message,
     place: Place,
     days: int,
-):
+) -> None:
 
     try:
 
         data = await get_weather(
-            place.latitude,
-            place.longitude,
-            days,
+            latitude=place.latitude,
+            longitude=place.longitude,
+            days=days,
         )
 
         if days == 1:
@@ -598,8 +635,9 @@ async def send_weather(
         )
 
         await message.answer(
-            "❌ Не удалось получить прогноз. "
-            "Попробуй ещё раз."
+            "❌ Не удалось получить прогноз.\n"
+            "Попробуй ещё раз через несколько секунд.",
+            reply_markup=main_keyboard(),
         )
 
 
@@ -611,7 +649,7 @@ async def start(
     message: Message,
     state: FSMContext,
     bot: Bot,
-):
+) -> None:
 
     if not await subscription_required(
         message,
@@ -623,20 +661,20 @@ async def start(
         "🌦 <b>Weather & Outfit</b>\n\n"
         "Я покажу погоду и подскажу, "
         "что лучше надеть.\n\n"
-        "Можно посмотреть погоду сейчас "
-        "или прогноз на 7 дней.",
+        "Выбери город и получи прогноз "
+        "с рекомендацией по одежде.",
         reply_markup=main_keyboard(),
     )
 
 
 # =========================================================
-# ПРОВЕРКА ПОДПИСКИ
+# CHECK SUBSCRIPTION
 # =========================================================
 
 async def check_subscription(
     callback: CallbackQuery,
     bot: Bot,
-):
+) -> None:
 
     if await is_subscribed(
         bot,
@@ -645,8 +683,12 @@ async def check_subscription(
 
         await callback.message.edit_text(
             "✅ <b>Подписка подтверждена!</b>\n\n"
-            "Теперь тебе доступен бот.\n"
+            "Теперь тебе доступен бот.\n\n"
             "Нажми /start."
+        )
+
+        await callback.answer(
+            "Подписка подтверждена!"
         )
 
     else:
@@ -658,14 +700,14 @@ async def check_subscription(
 
 
 # =========================================================
-# ВЫБОР ГОРОДА
+# CHOOSE CITY
 # =========================================================
 
 async def choose_city(
     message: Message,
     state: FSMContext,
     bot: Bot,
-):
+) -> None:
 
     if not await subscription_required(
         message,
@@ -687,11 +729,15 @@ async def choose_city(
     )
 
 
+# =========================================================
+# CITY INPUT
+# =========================================================
+
 async def city_input(
     message: Message,
     state: FSMContext,
     bot: Bot,
-):
+) -> None:
 
     if not await subscription_required(
         message,
@@ -699,15 +745,46 @@ async def city_input(
     ):
         return
 
+    if not message.text:
+        return
+
     city = message.text.strip()
 
-    place = await geocode(city)
+    if len(city) < 2:
+        await message.answer(
+            "❌ Напиши название города."
+        )
+        return
+
+    await message.answer(
+        "🔎 Ищу город..."
+    )
+
+    try:
+
+        place = await geocode(city)
+
+    except Exception:
+
+        logging.exception(
+            "Geocoding failed"
+        )
+
+        await message.answer(
+            "❌ Не удалось найти город.\n"
+            "Попробуй ещё раз."
+        )
+
+        return
 
     if not place:
 
         await message.answer(
-            "❌ Город не найден.\n"
-            "Попробуй написать название ещё раз."
+            "❌ Город не найден.\n\n"
+            "Попробуй, например:\n"
+            "Сочи\n"
+            "Москва\n"
+            "Краснодар"
         )
 
         return
@@ -719,24 +796,22 @@ async def city_input(
     await state.set_state(None)
 
     await message.answer(
-        f"✅ Город выбран:\n"
-        f"<b>{place_title(place)}</b>\n\n"
-        "Теперь выбери:\n"
-        "🌤 Погода сейчас\n"
-        "📅 7 дней",
+        "✅ <b>Город выбран</b>\n\n"
+        f"🏙 {place_title(place)}\n\n"
+        "Теперь выбери нужный прогноз.",
         reply_markup=main_keyboard(),
     )
 
 
 # =========================================================
-# ТЕКУЩАЯ ПОГОДА
+# CURRENT WEATHER
 # =========================================================
 
 async def current(
     message: Message,
     state: FSMContext,
     bot: Bot,
-):
+) -> None:
 
     if not await subscription_required(
         message,
@@ -744,7 +819,9 @@ async def current(
     ):
         return
 
-    place = await get_saved_place(state)
+    place = await get_saved_place(
+        state
+    )
 
     if not place:
 
@@ -764,14 +841,14 @@ async def current(
 
 
 # =========================================================
-# 7 ДНЕЙ
+# WEEK WEATHER
 # =========================================================
 
 async def week(
     message: Message,
     state: FSMContext,
     bot: Bot,
-):
+) -> None:
 
     if not await subscription_required(
         message,
@@ -779,7 +856,9 @@ async def week(
     ):
         return
 
-    place = await get_saved_place(state)
+    place = await get_saved_place(
+        state
+    )
 
     if not place:
 
@@ -799,19 +878,22 @@ async def week(
 
 
 # =========================================================
-# ГЕОЛОКАЦИЯ
+# LOCATION
 # =========================================================
 
 async def received_location(
     message: Message,
     state: FSMContext,
     bot: Bot,
-):
+) -> None:
 
     if not await subscription_required(
         message,
         bot,
     ):
+        return
+
+    if not message.location:
         return
 
     latitude = message.location.latitude
@@ -830,8 +912,8 @@ async def received_location(
     )
 
     await message.answer(
-        "📍 Геолокация получена.\n"
-        "Сейчас покажу погоду.",
+        "📍 <b>Геолокация получена!</b>\n\n"
+        "Сейчас получу прогноз.",
         reply_markup=main_keyboard(),
     )
 
@@ -849,51 +931,69 @@ async def received_location(
 async def main():
 
     bot = Bot(
-        TG_BOT_TOKEN,
+        token=TG_BOT_TOKEN,
         default=DefaultBotProperties(
             parse_mode=ParseMode.HTML
         ),
     )
 
-    dp = Dispatcher()
+    dispatcher = Dispatcher()
 
-    dp.callback_query.register(
+    # Проверка подписки
+    dispatcher.callback_query.register(
         check_subscription,
         F.data == "check_subscription",
     )
 
-    dp.message.register(
+    # /start
+    dispatcher.message.register(
         start,
         CommandStart(),
     )
 
-    dp.message.register(
+    # Геолокация
+    dispatcher.message.register(
         received_location,
         F.location,
     )
 
-    dp.message.register(
+    # Основные кнопки
+    dispatcher.message.register(
         choose_city,
         F.text == "🏙 Выбрать город",
     )
 
-    dp.message.register(
+    dispatcher.message.register(
         current,
         F.text == "🌤 Погода сейчас",
     )
 
-    dp.message.register(
+    dispatcher.message.register(
         week,
         F.text == "📅 7 дней",
     )
 
-    dp.message.register(
+    # Ввод города
+    dispatcher.message.register(
         city_input,
         SearchState.waiting_city,
     )
 
-    await dp.start_polling(bot)
+    logging.info(
+        "Weather & Outfit Bot started"
+    )
 
+    await dispatcher.start_polling(
+        bot
+    )
+
+
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("Bot stopped")
